@@ -5,8 +5,8 @@
  * should be tiny and transparent.
  */
 
-import {ITrie, ISearchOpts, ITestOpts} from './BaseTrie';
-import {BASE64_CHAR_TO_INT} from './base64';
+import { ITrie, ISearchOpts, ITestOpts } from './BaseTrie';
+import { BASE64_CHAR_TO_INT } from './base64';
 import {
     TERMINAL,
     VERSION,
@@ -15,8 +15,14 @@ import {
     OFFSET_SIGN_FIELD,
     OFFSET_VAL_FIELD,
     CHAR_WIDTH_FIELD,
-    POINTER_WIDTH_FIELD
+    POINTER_WIDTH_FIELD,
 } from './constants';
+
+export interface IPackedTrieNode {
+    char: string;
+    last: boolean;
+    childrenPointer: number | null;
+}
 
 /**
  * Extract a window of bits from a Base64 encoded sequence
@@ -40,7 +46,7 @@ function readBits(binary: string, start: number, len: number) {
 
     let rightPadding = endBit % 6;
     if (rightPadding) {
-        chunk >>= (6 - rightPadding);
+        chunk >>= 6 - rightPadding;
     }
 
     return chunk & mask;
@@ -54,7 +60,6 @@ function readBits(binary: string, start: number, len: number) {
  * @class
  */
 export class PackedTrie implements ITrie {
-
     /**
      * Binary string encoded as Base64 representing Trie
      * @type {String}
@@ -73,13 +78,13 @@ export class PackedTrie implements ITrie {
      * Character table, mapping character to an integer ID
      * @type {Object}
      */
-    private table: {[key: string]: number};
+    private table: { [key: string]: number };
 
     /**
      * Inverse of character table, mapping integer ID to character.
      * @type {Array}
      */
-    private inverseTable: {[key: number]: string};
+    private inverseTable: { [key: number]: string };
 
     /**
      * Number of bits in one word
@@ -166,10 +171,13 @@ export class PackedTrie implements ITrie {
         let headerFieldChars = Math.ceil(ptr / 6);
         let charTable = header.substr(headerFieldChars);
 
-        this.table = charTable.split('').reduce((agg, char, i) => {
-            agg[char] = i + 1;
-            return agg;
-        }, { [TERMINAL]: 0 } as {[key: string]: number});
+        this.table = charTable.split('').reduce(
+            (agg, char, i) => {
+                agg[char] = i + 1;
+                return agg;
+            },
+            { [TERMINAL]: 0 } as { [key: string]: number }
+        );
 
         // Construct inverse table
         this.inverseTable = [TERMINAL].concat(charTable.split(''));
@@ -194,10 +202,10 @@ export class PackedTrie implements ITrie {
      * @param  {Boolean?} opts.prefix - See PackedTrie#search prefix doc
      * @return {Boolean}
      */
-    test(str: string, {wildcard, prefix}: ITestOpts = {wildcard: null, prefix: false}) {
+    test(str: string, { wildcard, prefix }: ITestOpts = { wildcard: null, prefix: false }) {
         // Delegate to #search with early exit. Could write an optimized path,
         // especially for the prefix search case.
-        return this.search(str, {wildcard, prefix, first: true}) !== null;
+        return this.search(str, { wildcard, prefix, first: true }) !== null;
     }
 
     /**
@@ -217,7 +225,14 @@ export class PackedTrie implements ITrie {
      *                              first-only mode; otherwise return a list
      *                              of strings that match the query.
      */
-    search(str: string, {wildcard, prefix, first}: ISearchOpts = {wildcard: null, prefix: false, first: false}) {
+    search(
+        str: string,
+        { wildcard, prefix, first }: ISearchOpts = {
+            wildcard: null,
+            prefix: false,
+            first: false,
+        }
+    ) {
         if (wildcard && wildcard.length !== 1) {
             throw new Error(`Wilcard must be a single character; got ${wildcard}`);
         }
@@ -232,14 +247,14 @@ export class PackedTrie implements ITrie {
             pointerShift,
             pointerMask,
             charShift,
-            charMask
+            charMask,
         } = this;
 
         // List of matches found in the search.
         const matches = [];
 
         // Search queue.
-        const queue = [{pointer: 0, memo: '', depth: 0}];
+        const queue = [{ pointer: 0, memo: '', depth: 0 }];
         const lastDepth = str.length;
 
         // Do a BFS over nodes for the search query.
@@ -259,7 +274,7 @@ export class PackedTrie implements ITrie {
                 // Optimization: Exit immediately if the char was not found in
                 // the table (meaning there can't be any children in the trie
                 // with this character). Exception is wildcards.
-                if (!isWild && !table.hasOwnProperty(token)) {
+                if (!isWild && !this.hasChar(token)) {
                     break;
                 }
 
@@ -321,4 +336,49 @@ export class PackedTrie implements ITrie {
         return first ? null : matches;
     }
 
+    /**
+     * Check if a character is present in the trie
+     * @param {String} char - Character to test for
+     */
+    hasChar(char: string) {
+        return this.table.hasOwnProperty(char);
+    }
+
+    /**
+     * Reads a node at a pointer location. Reads beyond the size of the binary string
+     * will result in a TERMINAL node being returned
+     * @param {Number} pointer - Pointer to the node
+     */
+    getNodeAtPointer(pointer: number): IPackedTrieNode {
+        const {
+            data,
+            offset,
+            inverseTable,
+            wordWidth,
+            lastMask,
+            pointerShift,
+            pointerMask,
+            charShift,
+            charMask,
+        } = this;
+
+        const bits = pointer * wordWidth;
+        const chunk = readBits(data, bits, wordWidth);
+        const charIdx = (chunk >> charShift) & charMask;
+        const char = inverseTable[charIdx];
+        const last = !!(chunk & lastMask);
+
+        let childrenPointer = null;
+
+        if (char !== TERMINAL) {
+            const childrenOffset = (chunk >> pointerShift) & pointerMask;
+            childrenPointer = pointer + offset + childrenOffset;
+        }
+
+        return {
+            char,
+            last,
+            childrenPointer,
+        };
+    }
 }
