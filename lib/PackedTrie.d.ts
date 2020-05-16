@@ -1,8 +1,8 @@
 import { ITrie, ISearchOpts, ITestOpts } from './BaseTrie';
 export interface IPackedTrieNode {
     char: string;
-    last: number;
-    childrenPointer: number;
+    last: boolean;
+    childrenPointer: number | null;
 }
 export declare class PackedTrie implements ITrie {
     data: string;
